@@ -277,7 +277,6 @@
             const findRelevantChunks = (query) => {
                 const queryWords = new Set(query.toLowerCase().split(/\s+/).filter(w => w.length > 2));
                 if (queryWords.size === 0) {
-                    // Nếu câu hỏi quá ngắn, lấy một vài đoạn đầu tiên
                     return documentContext.textChunks.slice(0, 5);
                 }
 
@@ -294,10 +293,8 @@
 
                 scoredChunks.sort((a, b) => b.score - a.score);
                 
-                // Lấy các đoạn có điểm cao nhất, tối đa 7 đoạn
                 const topChunks = scoredChunks.filter(c => c.score > 0).slice(0, 7);
 
-                // Nếu không có đoạn nào khớp, trả về một vài đoạn đầu tiên để có ngữ cảnh
                 if (topChunks.length === 0) {
                     return documentContext.textChunks.slice(0, 5);
                 }
@@ -324,7 +321,7 @@
             };
 
             const addBotMessage = (message, isLoading = false) => {
-                removeLoader(); // Remove any previous loader before adding a new message or loader
+                removeLoader(); 
 
                 const messageElement = document.createElement('div');
                 messageElement.className = 'flex items-start gap-3';
@@ -341,7 +338,6 @@
                         </div>
                     `;
                 } else {
-                     // Sanitize the message to prevent HTML injection
                      const sanitizedMessage = message.replace(/</g, "&lt;").replace(/>/g, "&gt;");
                      contentHTML = `<p>${sanitizedMessage}</p>`;
                 }
@@ -372,8 +368,8 @@
                     const response = await callGeminiAPI(userQuery);
                     addBotMessage(response);
                 } catch (error) {
-                    console.error("Error calling Gemini API:", error);
-                    addBotMessage("Rất tiếc, đã có lỗi xảy ra. Vui lòng thử lại.");
+                    console.error("Lỗi trong lúc gửi tin nhắn:", error);
+                    addBotMessage(`Rất tiếc, đã có lỗi xảy ra: ${error.message}`);
                 } finally {
                     userInput.disabled = false;
                     sendBtn.disabled = false;
@@ -389,11 +385,16 @@
                 const apiKey = ""; 
                 const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${AIzaSyCFGXy1CsBJiBvG9GfvW0lvTz75raq6TlM}`;
 
-                // **BƯỚC 1: TÌM KIẾM THÔNG MINH**
                 const relevantChunks = findRelevantChunks(userQuery);
-                const textContext = relevantChunks
+                let textContext = relevantChunks
                     .map(chunk => `Trích đoạn từ '${chunk.source}':\n${chunk.content}`)
                     .join('\n\n---\n\n');
+
+                if (textContext.trim() === '' && documentContext.textChunks.length > 0) {
+                    textContext = "Không có trích đoạn văn bản nào được tìm thấy là có liên quan đến câu hỏi.";
+                } else if (textContext.trim() === '' && documentContext.textChunks.length === 0) {
+                    textContext = "Không có nội dung văn bản nào được cung cấp.";
+                }
 
                 const imageParts = documentContext.images
                     .map(doc => ({
@@ -405,7 +406,6 @@
                 
                 const systemInstruction = `Bạn là một trợ lý AI, chỉ được phép trả lời dựa trên các trích đoạn thông tin và hình ảnh được cung cấp. Tuyệt đối không được sử dụng kiến thức bên ngoài. Nếu câu trả lời không có trong thông tin được cung cấp, hãy trả lời một cách lịch sự rằng: "Tôi không tìm thấy thông tin về điều này trong các tài liệu bạn đã cung cấp."`;
 
-                // **BƯỚC 2: GỬI NGỮ CẢNH CHỌN LỌC TỚI AI**
                 const prompt = `Dựa vào các trích đoạn có liên quan nhất sau đây:\n\n${textContext}\n\nHãy phân tích các hình ảnh được cung cấp (nếu có) và trả lời câu hỏi của người dùng: "${userQuery}"`;
                 
                 const payload = {
@@ -433,9 +433,16 @@
                 });
 
                 if (!response.ok) {
-                    const errorBody = await response.json();
-                    console.error("API Error Response:", errorBody);
-                    throw new Error(`API request failed with status ${response.status}`);
+                    let errorBody;
+                    try {
+                        errorBody = await response.json();
+                        console.error("Phản hồi lỗi từ API:", errorBody);
+                    } catch (e) {
+                        errorBody = { error: { message: await response.text() || "Không thể đọc phản hồi lỗi." } };
+                        console.error("Phản hồi lỗi không phải JSON từ API:", errorBody.error.message);
+                    }
+                    const errorMessage = errorBody?.error?.message || `Yêu cầu API thất bại với mã trạng thái ${response.status}`;
+                    throw new Error(errorMessage);
                 }
 
                 const result = await response.json();
@@ -445,7 +452,7 @@
                     result.candidates[0].content.parts.length > 0) {
                     return result.candidates[0].content.parts[0].text;
                 } else {
-                    console.warn("Unexpected API response structure:", result);
+                    console.warn("Cấu trúc phản hồi không mong muốn:", result);
                     if (result.promptFeedback && result.promptFeedback.blockReason) {
                          return `Yêu cầu của bạn đã bị chặn vì lý do: ${result.promptFeedback.blockReason}. Vui lòng thử lại với một câu hỏi khác.`;
                     }
